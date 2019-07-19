@@ -12,9 +12,16 @@
 
 #define DHTpin 27    //D15 of Sparkfun ESP32 Thing
 #define SOIL_SENSOR 36
+#define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
+#define TIME_TO_SLEEP  5        /* Time ESP32 will go to sleep (in seconds) */
 
 const char* ssid     = "Bridge Four";
 const char* password = "TheLopen4";
+
+RTC_DATA_ATTR int bootCount = 0;
+int soil_amount;
+float humidity;
+float temperature;
 
 WiFiServer server(80);
 DHTesp dht;
@@ -51,77 +58,51 @@ void setup()
   Serial.println(WiFi.localIP());
   
   server.begin();
+
+  // Deep sleep setup.
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
 }
 
 void loop()
 {
   // Check for wifi client.
   WiFiClient client = server.available();   // Listen for incoming clients.
-  
+
+  // Read sensor values.
+  soil_amount = analogRead(SOIL_SENSOR);  // Query soil moisture sensor.
+  humidity = dht.getHumidity();           // Query humidity from DHT.
+  temperature = dht.getTemperature();     // Query temperature from DHT.
+
+  // Print data if the client is connected.
   if (client) {                             // if you get a client,
     Serial.println("New Client.");           // print a message out the serial port
     String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-//      if (client.available()) {             // if there's bytes to read from the client,
-//        char c = client.read();             // read a byte, then
-//        Serial.write(c);                    // print it out the serial monitor
-//        if (c == '\n') {                    // if the byte is a newline character
-//  
-//          // if the current line is blank, you got two newline characters in a row.
-//          // that's the end of the client HTTP request, so send a response:
-//          if (currentLine.length() == 0) {
-//            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-//            // and a content-type so the client knows what's coming, then a blank line:
-//            client.println("HTTP/1.1 200 OK");
-//            client.println("Content-type:text/html");
-//            client.println();
-//  
-//            // the content of the HTTP response follows the header:
-//            client.print("Click <a href=\"/H\">here</a> to turn the LED on pin 5 on.<br>");
-//            client.print("Click <a href=\"/L\">here</a> to turn the LED on pin 5 off.<br>");
-//  
-//            // The HTTP response ends with another blank line:
-//            client.println();
-//            // break out of the while loop:
-//            break;
-//          } else {    // if you got a newline, then clear currentLine:
-//            currentLine = "";
-//          }
-//        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-//          currentLine += c;      // add it to the end of the currentLine
-//        }
-  
-        // Query soil moisture sensor.
-        int soil_amount = analogRead(SOIL_SENSOR);
+    while (client.connected()) {            // loop while the client's connected  
+        // Print moisture data.
+        Serial.println("------------------------------------------------------------------------------------------");
+        Serial.print("Soil moisture level: ");
+        Serial.println(soil_amount);
       
-        // Print the data.
-        client.println("------------------------------------------------------------------------------------------");
-        client.print("Soil moisture level: ");
-        client.println(soil_amount);
-      
-        // Query humidity/temperature sensor.
-        float humidity = dht.getHumidity();
-        float temperature = dht.getTemperature();
-      
-        // Print the data.
-        client.println("Status\tHumidity (%)\tTemperature (C)\t(F)\tHeatIndex (C)\t(F)");
-        client.print(dht.getStatusString());
-        client.print("\t");
-        client.print(humidity, 1);
-        client.print("\t\t");
-        client.print(temperature, 1);
-        client.print("\t\t");
-        client.print(dht.toFahrenheit(temperature), 1);
-        client.print("\t\t");
-        client.print(dht.computeHeatIndex(temperature, humidity, false), 1);
-        client.print("\t\t");
-        client.println(dht.computeHeatIndex(dht.toFahrenheit(temperature), humidity, true), 1);
-        client.println("------------------------------------------------------------------------------------------");
-        client.println();
-      
-        // Delay until the next run.
-        delay(2000);
+        // Print humity and temperature data.
+        Serial.println("Status\tHumidity (%)\tTemperature (C)\t(F)\tHeatIndex (C)\t(F)");
+        Serial.print(dht.getStatusString());
+        Serial.print("\t");
+        Serial.print(humidity, 1);
+        Serial.print("\t\t");
+        Serial.print(temperature, 1);
+        Serial.print("\t\t");
+        Serial.print(dht.toFahrenheit(temperature), 1);
+        Serial.print("\t\t");
+        Serial.print(dht.computeHeatIndex(temperature, humidity, false), 1);
+        Serial.print("\t\t");
+        Serial.println(dht.computeHeatIndex(dht.toFahrenheit(temperature), humidity, true), 1);
+        Serial.println("------------------------------------------------------------------------------------------");
+        Serial.println();
       }
-//    }
   }
+
+  // Delay until the next run.
+  Serial.println("Going to sleep.");
+  Serial.flush(); 
+  esp_deep_sleep_start();
 }
