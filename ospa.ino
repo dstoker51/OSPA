@@ -12,9 +12,9 @@
 #include <HTTPClient.h>
 
 #define DHTpin 27    //D15 of Sparkfun ESP32 Thing
-#define SOIL_SENSOR 36
+#define SOIL_SENSOR 38
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  10        /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP  300       /* Time ESP32 will go to sleep (in seconds) */
 
 // Network
 const char* ssid     = "shadowsofsilence";
@@ -25,7 +25,7 @@ const char* sensor_id = "0x0001";
 const char* influxdb_query_url="http://172.16.0.1:8086/write?db=ospa_test1&u=bot&p=allyourbasearebelongtous";
 
 RTC_DATA_ATTR int bootCount = 0;
-int moisture_level;
+float moisture_level;
 float humidity;
 float temp_c;
 
