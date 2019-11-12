@@ -21,7 +21,7 @@ const char* ssid     = "shadowsofsilence";
 const char* password = "intheforestsofhell";
 
 // InfluxDB
-const char* sensor_id = "0x0001";
+const char* sensor_id = "0x0003";
 const char* influxdb_query_url="http://172.16.0.1:8086/write?db=ospa_test1&u=bot&p=allyourbasearebelongtous";
 
 RTC_DATA_ATTR int bootCount = 0;
@@ -97,6 +97,7 @@ float get_averaged_soil_moisture(int num_samples) {
     average = (average + moisture_level) * 0.5;
     delay(1);
   }
+  return average;
 }
 
 void setup()
