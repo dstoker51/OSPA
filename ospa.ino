@@ -16,27 +16,35 @@
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP  300       /* Time ESP32 will go to sleep (in seconds) */
 
+// Deep sleep
+RTC_DATA_ATTR int bootCount = 0;
+
 // Network
-const char* ssid     = "shadowsofsilence";
-const char* password = "intheforestsofhell";
+const char* wifi_ssid     = "shadowsofsilence";
+const char* wifi_password = "intheforestsofhell";
 
 // InfluxDB
-const char* sensor_id = "0x0003";
-const char* influxdb_query_url="http://172.16.0.1:8086/write?db=ospa_test1&u=bot&p=allyourbasearebelongtous";
+String database_url = "172.16.0.1";
+String database_port = "8086";
+String database_user = "bot";
+String database_password = "allyourbasearebelongtous";
+String soil_moisture_database = "darinshouse_soil_moisture";
+String temp_humidity_database = "darinshouse_temp_humidity";
+String field_id = "DarinsBackyard";
+String board_id = "esp32-0002";
+String soil_moisture_sensor_id = "csms-0001";
+String temp_humidity_sensor_id = "dht22-0001";
+String soil_moisture_query_url="http://" + database_url + ":" + database_port + "/write?db=" + soil_moisture_database + "&u=" + database_user + "&p=" + database_password;
+String temp_humidity_query_url="http://" + database_url + ":" + database_port + "/write?db=" + temp_humidity_database + "&u=" + database_user + "&p=" + database_password;
 
-RTC_DATA_ATTR int bootCount = 0;
-float moisture_level;
-float humidity;
-float temp_c;
-
-WiFiServer server(80);
+// Sensors
 DHTesp dht;
 
-void serial_print_sensor_values() {
+void serial_print_sensor_values(float soil_moisture, float humidity, float temp_c, float temp_f) {
   // Print moisture data.
   Serial.println("------------------------------------------------------------------------------------------");
   Serial.print("Soil moisture level: ");
-  Serial.println(moisture_level);
+  Serial.println(soil_moisture);
 
   // Print humity and temperature data.
   Serial.println("Status\tHumidity (%)\tTemperature (C)\t(F)\tHeatIndex (C)\t(F)");
@@ -46,36 +54,23 @@ void serial_print_sensor_values() {
   Serial.print("\t\t");
   Serial.print(temp_c, 1);
   Serial.print("\t\t");
-  Serial.print(dht.toFahrenheit(temp_c), 1);
+  Serial.print(temp_f, 1);
   Serial.print("\t\t");
   Serial.print(dht.computeHeatIndex(temp_c, humidity, false), 1);
   Serial.print("\t\t");
-  Serial.println(dht.computeHeatIndex(dht.toFahrenheit(temp_c), humidity, true), 1);
+  Serial.println(dht.computeHeatIndex(temp_f, humidity, true), 1);
   Serial.println("------------------------------------------------------------------------------------------");
   Serial.println();
 }
 
-void client_print_sensor_values(WiFiClient &client) {
-  // Print moisture data.
-  client.println("------------------------------------------------------------------------------------------");
-  client.print("Soil moisture level: ");
-  client.println(moisture_level);
+String construct_line_protocol_for_soil_moisture_sensor(char* sensor_id, float soil_moisture_level) {
+  // TODO: Get rid of String objects.
+  return String("sensor_data,field_id=" + field_id) + "sensor_id=" + sensor_id + ",soil_moisture_level=" + moisture_level;
+}
 
-  // Print humity and temperature data.
-  client.println("Status\tHumidity (%)\tTemperature (C)\t(F)\tHeatIndex (C)\t(F)");
-  client.print(dht.getStatusString());
-  client.print("\t");
-  client.print(humidity, 1);
-  client.print("\t\t");
-  client.print(temp_c, 1);
-  client.print("\t\t");
-  client.print(dht.toFahrenheit(temp_c), 1);
-  client.print("\t\t");
-  client.print(dht.computeHeatIndex(temp_c, humidity, false), 1);
-  client.print("\t\t");
-  client.println(dht.computeHeatIndex(dht.toFahrenheit(temp_c), humidity, true), 1);
-  client.println("------------------------------------------------------------------------------------------");
-  client.println();
+String construct_line_protocol_for_temp_humidity_sensor(char* sensor_id, float humidity, float temp_c, float temp_f) {
+  // TODO: Get rid of String objects.
+  return String("sensor_data,field_id=" + field_id) + " sensor_id=" + sensor_id + ",humidity=" + humidity + ",temp_c=" + temp_c + ",temp_f=" + temp_f;
 }
 
 // Requires esp_sleep_enable_timer_wakeup to have been set.
@@ -119,9 +114,9 @@ void setup()
   // Wifi Server setup.
   Serial.println();
   Serial.print("Connecting to ");
-  Serial.println(ssid);
+  Serial.println(wifi_ssid);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_password);
 
   // Even though this is a long-running system, there is no need to worry about overflow due to the 
   // deep sleep mode we are using. Millis will reset each time the system goes to sleep. 
@@ -151,25 +146,12 @@ void setup()
 void loop()
 {
   // Read sensor values.
-  moisture_level = get_averaged_soil_moisture(100); // Query soil moisture sensor.
-  humidity = dht.getHumidity();   // Query humidity from DHT.
-  temp_c = dht.getTemperature();  // Query temperature from DHT.
+  float moisture_level = get_averaged_soil_moisture(100); // Query soil moisture sensor.
+  float humidity = dht.getHumidity();   // Query humidity from DHT.
+  float temp_c = dht.getTemperature();  // Query temperature from DHT.
   float temp_f = dht.toFahrenheit(temp_c);  // Convert to Fahrenheit.
 
-  // Check for wifi client.
-  WiFiClient client = server.available();   // Listen for incoming clients.
-
   serial_print_sensor_values();
-
-  // Print data if the client is connected.
-  if (client) {                             // If you get a client,
-    Serial.println("New Client.");          // print a message out the serial port.
-    String currentLine = "";                // Make a String to hold incoming data from the client.
-    while (client.connected()) {            // Loop while the client's connected.
-        client_print_sensor_values(client);
-        delay(500);
-    } 
-  }
 
   // Send data to InfluxDB.
   if(WiFi.status()== WL_CONNECTED) {   // Check WiFi connection status.
@@ -178,8 +160,14 @@ void loop()
     http.begin(influxdb_query_url);    // Specify request destination.
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");  // Specify content-type header.
   
-    // Generate the request payload and send it out.
-    int httpCode = http.POST(String("sensor_data,field_id=KaysvilleCoverCropPlots") + " humidity=" + humidity + ",temp_c=" + temp_c + ",temp_f=" + temp_f + ",soil_moisture_level=" + moisture_level);   
+    // Send the soil moisture sensor data.
+    int httpCode = http.POST(construct_line_protocol_for_soil_moisture_sensor(soil_moisture_sensor_id, moisture_level));   
+    String response_payload = http.getString(); // Get the response payload.
+    Serial.println(httpCode);   // Print HTTP return code.
+    Serial.println(response_payload); //Print request response payload.
+
+    // Send the temp/humidity sensor data.
+    int httpCode = http.POST(construct_line_protocol_for_temp_humidity_sensor(temp_humidity_sensor_id, humidity, temp_c, temp_f));   
     String response_payload = http.getString(); // Get the response payload.
     Serial.println(httpCode);   // Print HTTP return code.
     Serial.println(response_payload); //Print request response payload.
