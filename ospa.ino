@@ -31,7 +31,7 @@ String database_password = "allyourbasearebelongtous";
 String soil_moisture_database = "darinshouse_soil_moisture";
 String temp_humidity_database = "darinshouse_temp_humidity";
 String field_id = "DarinsBackyard";
-String board_id = "esp32-0002";
+String board_id = "esp32-0003";
 String soil_moisture_sensor_id = "csms-0001";
 String temp_humidity_sensor_id = "dht22-0001";
 String soil_moisture_query_url="http://" + database_url + ":" + database_port + "/write?db=" + soil_moisture_database + "&u=" + database_user + "&p=" + database_password;
@@ -63,14 +63,14 @@ void serial_print_sensor_values(float soil_moisture, float humidity, float temp_
   Serial.println();
 }
 
-String construct_line_protocol_for_soil_moisture_sensor(char* sensor_id, float soil_moisture_level) {
+String construct_line_protocol_for_soil_moisture_sensor(String sensor_id, float soil_moisture_level) {
   // TODO: Get rid of String objects.
-  return String("sensor_data,field_id=" + field_id) + "sensor_id=" + sensor_id + ",soil_moisture_level=" + moisture_level;
+  return String("sensor_data,field_id=" + field_id + ",board_id=" + board_id) + " sensor_id=\"" + sensor_id + "\",soil_moisture_level=" + soil_moisture_level;
 }
 
-String construct_line_protocol_for_temp_humidity_sensor(char* sensor_id, float humidity, float temp_c, float temp_f) {
+String construct_line_protocol_for_temp_humidity_sensor(String sensor_id, float humidity, float temp_c, float temp_f) {
   // TODO: Get rid of String objects.
-  return String("sensor_data,field_id=" + field_id) + " sensor_id=" + sensor_id + ",humidity=" + humidity + ",temp_c=" + temp_c + ",temp_f=" + temp_f;
+  return String("sensor_data,field_id=" + field_id + ",board_id=" + board_id) + " sensor_id=\"" + sensor_id + "\",humidity=" + humidity + ",temp_c=" + temp_c + ",temp_f=" + temp_f;
 }
 
 // Requires esp_sleep_enable_timer_wakeup to have been set.
@@ -88,8 +88,8 @@ float get_averaged_soil_moisture(int num_samples) {
 
   float average = analogRead(SOIL_SENSOR);
   for(int i=0; i<num_samples; i++) {
-    float moisture_level = analogRead(SOIL_SENSOR); // Query soil moisture sensor.
-    average = (average + moisture_level) * 0.5;
+    float soil_moisture = analogRead(SOIL_SENSOR); // Query soil moisture sensor.
+    average = (average + soil_moisture) * 0.5;
     delay(1);
   }
   return average;
@@ -139,41 +139,47 @@ void setup()
   Serial.println("WiFi connected.");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-  
-  server.begin();
 }
 
 void loop()
 {
   // Read sensor values.
-  float moisture_level = get_averaged_soil_moisture(100); // Query soil moisture sensor.
+  float soil_moisture = get_averaged_soil_moisture(100); // Query soil moisture sensor.
   float humidity = dht.getHumidity();   // Query humidity from DHT.
   float temp_c = dht.getTemperature();  // Query temperature from DHT.
   float temp_f = dht.toFahrenheit(temp_c);  // Convert to Fahrenheit.
 
-  serial_print_sensor_values();
+  serial_print_sensor_values(soil_moisture, humidity, temp_c, temp_f);
 
   // Send data to InfluxDB.
   if(WiFi.status()== WL_CONNECTED) {   // Check WiFi connection status.
-    // Create HTTP request.
-    HTTPClient http;
-    http.begin(influxdb_query_url);    // Specify request destination.
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");  // Specify content-type header.
-  
     // Send the soil moisture sensor data.
-    int httpCode = http.POST(construct_line_protocol_for_soil_moisture_sensor(soil_moisture_sensor_id, moisture_level));   
-    String response_payload = http.getString(); // Get the response payload.
-    Serial.println(httpCode);   // Print HTTP return code.
-    Serial.println(response_payload); //Print request response payload.
+    HTTPClient http;
+    http.begin(soil_moisture_query_url);    // Specify request destination.
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");  // Specify content-type header.
 
-    // Send the temp/humidity sensor data.
-    int httpCode = http.POST(construct_line_protocol_for_temp_humidity_sensor(temp_humidity_sensor_id, humidity, temp_c, temp_f));   
+    // Send request and get the response.
+    int httpCode = http.POST(construct_line_protocol_for_soil_moisture_sensor(soil_moisture_sensor_id, soil_moisture));   
     String response_payload = http.getString(); // Get the response payload.
     Serial.println(httpCode);   // Print HTTP return code.
     Serial.println(response_payload); //Print request response payload.
 
     // Close connection
     http.end(); 
+
+    // Send the Temp/humidity sensor data.
+    http.begin(temp_humidity_query_url);    // Specify request destination.
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");  // Specify content-type header.
+
+    // Send the temp/humidity sensor data.
+    httpCode = http.POST(construct_line_protocol_for_temp_humidity_sensor(temp_humidity_sensor_id, humidity, temp_c, temp_f));   
+    response_payload = http.getString(); // Get the response payload.
+    Serial.println(httpCode);   // Print HTTP return code.
+    Serial.println(response_payload); //Print request response payload.
+
+    // Close connection
+    http.end();
+    
   }
   else {
     Serial.println("Error in WiFi connection.");   
